@@ -8,7 +8,7 @@ name = "sp-cli2"
 path = "src/main.rs"
 
 [dependencies]
-bdk_sp = { version = "0.1.0", path = "../../silentpayments/", features = ["serde", "psbt_sp_spend"]}
+bdk_sp = { version = "0.2.0", path = "../../silentpayments/", features = ["serde", "psbt_sp_spend"]}
 bdk_file_store = "0.21.0"
 bdk_bitcoind_rpc = { version = "0.20.0" }
 bdk_coin_select = { version = "0.4.0" }

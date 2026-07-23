@@ -1,3 +1,8 @@
+# 0.2.0
+
+- Fix bug that allows the creation of silent payment outputs without collecting
+  all the eligible input private keys. #63
+
 # 0.1.0
 
 - Functions for encoding and decoding Silent Payment Codes (BIP352).
