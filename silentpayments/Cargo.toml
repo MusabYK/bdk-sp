@@ -6,7 +6,7 @@ rust-version = "1.63"
 homepage = "https://bitcoindevkit.org"
 repository = "https://github.com/bitcoindevkit/bdk-sp"
 license = "MIT OR Apache-2.0"
-readme = "README.md"
+readme = "../README.md"
 
 [dependencies]
 bitcoin = { version = "0.32.6", default-features = true }
