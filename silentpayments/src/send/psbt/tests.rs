@@ -649,10 +649,89 @@ mod collect_input_data {
 
         let result = collect_input_data(&psbt, &key_provider, &secp);
 
-        assert!(matches!(
-            result.unwrap_err(),
-            SpSendError::MissingInputsForSharedSecretDerivation
-        ));
+        assert!(matches!(result.unwrap_err(), SpSendError::KeyError));
+    }
+
+    #[test]
+    fn missing_p2wpkh_key_for_one_of_multiple_eligible_inputs() {
+        let sp_codes = setup_sp_codes();
+        let sp_code = &sp_codes[0];
+        let outputs = vec![get_placeholder_txout(1000, sp_code)];
+        let mut psbt = create_test_psbt(outputs);
+        let (priv_key, xonly_pk, script_pubkey, witness) = create_p2tr_input_data();
+        let key_source = create_key_source();
+        psbt.inputs[0]
+            .tap_key_origins
+            .insert(xonly_pk, (vec![], key_source.clone()));
+        psbt.inputs[0].witness_utxo = Some(TxOut {
+            value: Amount::from_sat(10000),
+            script_pubkey,
+        });
+        psbt.inputs[0].final_script_witness = Some(witness);
+
+        let (_, missing_pubkey, missing_script_pubkey, missing_witness) =
+            create_non_p2tr_input_data();
+        let mut missing_txin = psbt.unsigned_tx.input[0].clone();
+        missing_txin.previous_output.vout = 1;
+        psbt.unsigned_tx.input.push(missing_txin);
+
+        let mut missing_psbt_input = psbt.inputs[0].clone();
+        missing_psbt_input.tap_key_origins.clear();
+        missing_psbt_input
+            .bip32_derivation
+            .insert(missing_pubkey, key_source);
+        missing_psbt_input.witness_utxo = Some(TxOut {
+            value: Amount::from_sat(10000),
+            script_pubkey: missing_script_pubkey,
+        });
+        missing_psbt_input.final_script_witness = Some(missing_witness);
+        psbt.inputs.push(missing_psbt_input);
+
+        let key_provider = MockKeyProvider::default().with_xonly_key(xonly_pk, priv_key);
+        let secp = Secp256k1::new();
+
+        let result = collect_input_data(&psbt, &key_provider, &secp);
+
+        assert!(matches!(result.unwrap_err(), SpSendError::KeyError));
+    }
+
+    #[test]
+    fn ineligible_input_without_key_is_skipped() {
+        let sp_codes = setup_sp_codes();
+        let sp_code = &sp_codes[0];
+        let outputs = vec![get_placeholder_txout(1000, sp_code)];
+        let mut psbt = create_test_psbt(outputs);
+        let (priv_key, xonly_pk, script_pubkey, witness) = create_p2tr_input_data();
+        let key_source = create_key_source();
+        psbt.inputs[0]
+            .tap_key_origins
+            .insert(xonly_pk, (vec![], key_source));
+        psbt.inputs[0].witness_utxo = Some(TxOut {
+            value: Amount::from_sat(10000),
+            script_pubkey,
+        });
+        psbt.inputs[0].final_script_witness = Some(witness);
+
+        let mut ineligible_txin = psbt.unsigned_tx.input[0].clone();
+        ineligible_txin.previous_output.vout = 1;
+        psbt.unsigned_tx.input.push(ineligible_txin);
+
+        let mut ineligible_psbt_input = psbt.inputs[0].clone();
+        ineligible_psbt_input.tap_key_origins.clear();
+        ineligible_psbt_input.witness_utxo = Some(TxOut {
+            value: Amount::from_sat(10000),
+            script_pubkey: ScriptBuf::new(),
+        });
+        ineligible_psbt_input.final_script_witness = Some(Witness::new());
+        psbt.inputs.push(ineligible_psbt_input);
+
+        let key_provider = MockKeyProvider::default().with_xonly_key(xonly_pk, priv_key);
+        let secp = Secp256k1::new();
+
+        let result = collect_input_data(&psbt, &key_provider, &secp);
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().scripts_with_secrets.len(), 1);
     }
 
     #[test]

@@ -208,7 +208,7 @@ where
 
 /// Collects input data required for silent payment derivation from a [`Psbt`].
 ///
-/// This function iterates through all [`Psbt`] inputs, request private keys where available,
+/// This function iterates through all [`Psbt`] inputs, requests keys for every eligible input,
 /// and determines the lexicographically smallest outpoint for the silent payment protocol.
 ///
 /// # Arguments
@@ -253,12 +253,12 @@ where
                                     Err(SpSendError::KeyError)
                                 }
                             }
-                            Ok(None) => Ok(None),
-                            Err(_) => Err(SpSendError::KeyError),
+                            Ok(None) | Err(..) => Err(SpSendError::KeyError),
                         }
                     }
                     _ => get_non_taproot_secret(psbt_input, k, secp)
-                        .map_err(|_| SpSendError::KeyError),
+                        .map_err(|_| SpSendError::KeyError)
+                        .and_then(|secret| secret.map(Some).ok_or(SpSendError::KeyError)),
                 })
                 .transpose()?
                 .flatten()
