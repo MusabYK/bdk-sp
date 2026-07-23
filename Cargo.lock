@@ -271,7 +271,6 @@ name = "bdk_sp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bdk_sp",
  "bdk_testenv",
  "bitcoin",
  "miniscript",
