@@ -380,7 +380,10 @@ impl TryFrom<&str> for SilentPaymentCode {
         let hrp = checked_hrpstring.hrp();
         let mut payload = checked_hrpstring.fe32_iter::<&mut dyn Iterator<Item = u8>>();
 
-        let version = payload.nth(0).into_iter().collect::<Vec<_>>()[0].to_u8();
+        let version = payload
+            .next()
+            .ok_or(VersionError::WrongPayloadLength)?
+            .to_u8();
         let data = payload.fes_to_bytes().collect::<Vec<u8>>();
         let keys = match version {
             0 => {
@@ -658,6 +661,15 @@ mod test {
         #[test]
         fn vector_10_fail_to_parse_mainnet_code_with_invalid_checksum() {
             assert_encoding(10);
+        }
+
+        #[test]
+        fn fail_to_parse_code_with_empty_payload() {
+            let error = SilentPaymentCode::try_from("sp10ajr90").unwrap_err();
+            assert_eq!(
+                "payload length does not match version spec",
+                error.to_string()
+            );
         }
 
         #[test]
