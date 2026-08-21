@@ -631,8 +631,11 @@ async fn main() -> anyhow::Result<()> {
             let mut sp_recipients: Vec<SilentPaymentCode> = vec![wallet.get_change_address()];
             if let Some(sp_codes) = maybe_sp_codes {
                 for (sp_code, value) in sp_codes {
-                    if sp_code.network != wallet.network() {
-                        bail!("");
+                    if !sp_code.is_valid_for_network(wallet.network()) {
+                        bail!(
+                            "silent payment code {sp_code} cannot be paid from a {} wallet",
+                            wallet.network()
+                        );
                     }
                     let placeholder_script = sp_code.get_placeholder_p2tr_spk();
                     outputs.push(Output::with_script(
