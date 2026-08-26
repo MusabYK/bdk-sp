@@ -26,8 +26,6 @@ When adding features, consider long-term technical debt. Cover new features with
 
 For refactoring, structure PRs for easy review and split into multiple small, focused PRs if needed.
 
-The minimal supported Rust version is **1.63.0** (enforced by CI).
-
 Commits should describe the issue fixed and the solution's rationale.
 
 Consider [cbeams guidelines](https://chris.beams.io/posts/git-commit/) to write commit messages. Apply ["Conventional Commits 1.0.0"](https://www.conventionalcommits.org/en/v1.0.0/) for readable commit histories for humans, tools and LLMs.
