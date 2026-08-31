@@ -93,6 +93,9 @@ pub fn extract_pubkey(txin: TxIn, script_pubkey: &ScriptBuf) -> Option<(SpInputs
     })
 }
 
+/// BIP-352 per-group recipient limit.
+pub const K_MAX: u32 = 2323;
+
 pub fn scan_txouts(
     spend_pk: PublicKey,
     label_lookup: &BTreeMap<PublicKey, (Scalar, u32)>,
@@ -123,6 +126,9 @@ pub fn scan_txouts(
     ) {
         spouts_found.push(spout);
         matched_tweaks += 1;
+        if matched_tweaks > K_MAX {
+            return Err(SpReceiveError::ScanLimitExceeded(K_MAX));
+        }
     }
 
     Ok(spouts_found)
