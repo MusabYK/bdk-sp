@@ -13,7 +13,7 @@
 ///
 /// silent payment codes follow a structured format with network-specific prefixes:
 /// - `sp` for Bitcoin mainnet
-/// - `tsp` for Testnet/Signet
+/// - `tsp` for Testnet, Testnet4 and Signet
 /// - `sprt` for Regtest
 pub use self::error::{ParseError, UnknownHrpError, VersionError};
 use crate::hashes::get_label_tweak;
@@ -40,6 +40,26 @@ pub const SP: Hrp = Hrp::parse_unchecked("sp");
 pub const TSP: Hrp = Hrp::parse_unchecked("tsp");
 /// Human readable prefix for encoding bitcoin regtest silent payment codes
 pub const SPRT: Hrp = Hrp::parse_unchecked("sprt");
+
+/// Returns the human readable prefix silent payment codes use on `network`.
+///
+/// This mapping is not injective: BIP 352 gives every test network the same prefix, so
+/// [`Network::Testnet`], [`Network::Testnet4`] and [`Network::Signet`] all encode to
+/// [`TSP`]. A parsed code therefore identifies a group of networks sharing a prefix
+/// rather than one exact chain, and [`SilentPaymentCode::try_from`] reports
+/// [`Network::Testnet`] for all three.
+///
+/// Prefer [`SilentPaymentCode::is_valid_for_network`] over comparing [`Network`] values
+/// when checking a parsed code against a wallet.
+pub fn hrp_for_network(network: Network) -> Hrp {
+    match network {
+        Network::Bitcoin => SP,
+        Network::Testnet | Network::Testnet4 | Network::Signet => TSP,
+        // NOTE: Shouldn't be any other case than Regtest, but add because Network is non
+        // exhaustive
+        _ => SPRT,
+    }
+}
 
 /// Represents a silent payment code containing the necessary keys and network information.
 ///
@@ -231,6 +251,46 @@ impl SilentPaymentCode {
     pub fn version(&self) -> u8 {
         self.version
     }
+
+    /// Returns whether this code may be used on `network`.
+    ///
+    /// A parsed code names a group of networks sharing a human readable prefix, not one
+    /// exact chain. BIP 352 assigns the same `tsp` prefix to every test network, so a
+    /// code written for Signet or Testnet4 reports [`Network::Testnet`] once decoded.
+    ///
+    /// Regtest forms its own group, because this crate gives it a separate [`SPRT`]
+    /// prefix rather than sharing one with the other test networks.
+    ///
+    /// # Examples
+    /// ```rust
+    /// use bdk_sp::encoding::SilentPaymentCode;
+    /// use bitcoin::{key::rand, secp256k1::Secp256k1, Network};
+    ///
+    /// # let secp = Secp256k1::new();
+    /// # let (_, scan_pk) = secp.generate_keypair(&mut rand::thread_rng());
+    /// # let (_, spend_pk) = secp.generate_keypair(&mut rand::thread_rng());
+    /// // A code written for Signet encodes with the prefix shared by all test networks,
+    /// let signet_code = SilentPaymentCode::new_v0(scan_pk, spend_pk, Network::Signet);
+    /// let encoded = signet_code.to_string();
+    /// assert!(encoded.starts_with("tsp1"));
+    ///
+    /// // so parsing it back reports the canonical test network rather than Signet.
+    /// let parsed = SilentPaymentCode::try_from(encoded.as_str())?;
+    /// assert_eq!(parsed.network, Network::Testnet);
+    ///
+    /// // It is still a valid recipient for a Signet or Testnet4 wallet.
+    /// assert!(parsed.is_valid_for_network(Network::Signet));
+    /// assert!(parsed.is_valid_for_network(Network::Testnet4));
+    /// assert!(parsed.is_valid_for_network(Network::Testnet));
+    ///
+    /// // But not for a wallet on a chain using a different prefix.
+    /// assert!(!parsed.is_valid_for_network(Network::Bitcoin));
+    /// assert!(!parsed.is_valid_for_network(Network::Regtest));
+    /// # Ok::<(), bdk_sp::encoding::ParseError>(())
+    /// ```
+    pub fn is_valid_for_network(&self, network: Network) -> bool {
+        hrp_for_network(self.network) == hrp_for_network(network)
+    }
 }
 
 impl core::fmt::Display for SilentPaymentCode {
@@ -260,13 +320,7 @@ impl core::fmt::Display for SilentPaymentCode {
     /// // encoded is a Bech32m string starting with "sp1"
     /// ```
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let hrp = match self.network {
-            Network::Bitcoin => SP,
-            Network::Testnet | Network::Testnet4 | Network::Signet => TSP,
-            // NOTE: Shouldn't be any other case than Regtest, but add because Network is non
-            // exhaustive
-            _ => SPRT,
-        };
+        let hrp = hrp_for_network(self.network);
 
         let scan_key_bytes = self.scan.serialize();
         let tweaked_spend_pubkey_bytes = self.spend.serialize();
@@ -657,6 +711,96 @@ mod test {
                 expected_placeholder_spk,
                 output_placeholder_spk.to_hex_string()
             );
+        }
+    }
+
+    mod network_compatibility {
+        use crate::encoding::SilentPaymentCode;
+        use bitcoin::{
+            secp256k1::PublicKey,
+            Network::{self, Bitcoin, Regtest, Signet, Testnet, Testnet4},
+        };
+        use std::str::FromStr;
+
+        const SCAN_PK: &str = "03f95241dfb00d1d42e2f48fb72e31a06b9fd166c1d6bd12648b41977dd51b9a0b";
+        const SPEND_PK: &str = "032e58afe51f9ed8ad3cc7897f634d881fdbe49a81564629ded8156bebd2ffd1af";
+
+        /// Encodes a code for `network`, then parses it back the way a wallet does when
+        /// it is handed a recipient string.
+        fn parse_code_written_for(network: Network) -> SilentPaymentCode {
+            let scan = PublicKey::from_str(SCAN_PK).expect("valid scan key");
+            let spend = PublicKey::from_str(SPEND_PK).expect("valid spend key");
+            let encoded = SilentPaymentCode::new_v0(scan, spend, network).to_string();
+            SilentPaymentCode::try_from(encoded.as_str()).expect("should parse back")
+        }
+
+        #[test]
+        fn tsp_code_is_accepted_by_every_test_network_wallet() {
+            // A parsed `tsp` code cannot say which test chain it was written for, so it
+            // has to be accepted by all of them whichever one produced it.
+            for written_for in [Testnet, Testnet4, Signet] {
+                let sp_code = parse_code_written_for(written_for);
+                assert_eq!(
+                    sp_code.network, Testnet,
+                    "parsing canonicalizes every test network to testnet"
+                );
+                for wallet in [Testnet, Testnet4, Signet] {
+                    assert!(
+                        sp_code.is_valid_for_network(wallet),
+                        "code written for {written_for} rejected by a {wallet} wallet"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn tsp_code_is_rejected_by_mainnet_and_regtest_wallets() {
+            let sp_code = parse_code_written_for(Signet);
+            assert!(!sp_code.is_valid_for_network(Bitcoin));
+            assert!(!sp_code.is_valid_for_network(Regtest));
+        }
+
+        #[test]
+        fn sprt_code_is_accepted_only_by_a_regtest_wallet() {
+            // Regtest is its own group: this crate gives it a separate prefix instead of
+            // sharing `tsp` with the other test networks.
+            let sp_code = parse_code_written_for(Regtest);
+            assert_eq!(sp_code.network, Regtest);
+            assert!(sp_code.is_valid_for_network(Regtest));
+            for wallet in [Bitcoin, Testnet, Testnet4, Signet] {
+                assert!(!sp_code.is_valid_for_network(wallet));
+            }
+        }
+
+        #[test]
+        fn sp_code_is_accepted_only_by_a_mainnet_wallet() {
+            let sp_code = parse_code_written_for(Bitcoin);
+            assert_eq!(sp_code.network, Bitcoin);
+            assert!(sp_code.is_valid_for_network(Bitcoin));
+            for wallet in [Testnet, Testnet4, Signet, Regtest] {
+                assert!(!sp_code.is_valid_for_network(wallet));
+            }
+        }
+
+        #[test]
+        fn prefix_assignment_is_unchanged() {
+            // Guards the grouping itself: comparing prefixes must not alter which prefix
+            // each network encodes to.
+            let scan = PublicKey::from_str(SCAN_PK).expect("valid scan key");
+            let spend = PublicKey::from_str(SPEND_PK).expect("valid spend key");
+            for (network, expected_prefix) in [
+                (Bitcoin, "sp1"),
+                (Testnet, "tsp1"),
+                (Testnet4, "tsp1"),
+                (Signet, "tsp1"),
+                (Regtest, "sprt1"),
+            ] {
+                let encoded = SilentPaymentCode::new_v0(scan, spend, network).to_string();
+                assert!(
+                    encoded.starts_with(expected_prefix),
+                    "{network} should encode with {expected_prefix}, got {encoded}"
+                );
+            }
         }
     }
 }
