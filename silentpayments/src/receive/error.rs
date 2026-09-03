@@ -8,6 +8,8 @@ pub enum SpReceiveError {
     SliceError(bitcoin::key::FromSliceError),
     /// Cannot derive silent payment output without input prevout outpoints
     NoOutpoints(crate::LexMinError),
+    /// The number of matched tweaks exceeded the BIP-352 per-group recipient limit
+    ScanLimitExceeded(u32),
 }
 
 impl From<crate::LexMinError> for SpReceiveError {
@@ -41,6 +43,9 @@ impl std::fmt::Display for SpReceiveError {
             SpReceiveError::Secp256k1Error(e) => write!(f, "Silent payment receive error: {e}"),
             SpReceiveError::SliceError(e) => write!(f, "Silent payment receive error: {e}"),
             Self::NoOutpoints(e) => write!(f, "Silent payment sending error: {e}"),
+            SpReceiveError::ScanLimitExceeded(k) => {
+                write!(f, "Silent payment receive error: Scan limit exceeded ({k})")
+            }
         }
     }
 }
